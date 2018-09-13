@@ -2,23 +2,30 @@
 
 set -e
 
-#%include out.sh colours.sh
+#%include out.sh colours.sh abspath.sh
 #%include help.sh
 
 STR_clean_tree="working (tree|directory) clean"
+: ${GITSA_shell=false}
 
 git-status() { (
 	cd "$1"
-	echo "${CYEL}$(dirname "$1")${CDEF}"
+	echo "${CYEL}$1${CDEF}"
 	git status  | sed -r "s/^(\t.+)$/${CBRED}\1${CDEF}/ ; s/^/\t/"
 ) ; }
 
 is-clean() {
 	if [[ ! "$*" =~ $STR_clean_tree ]]; then
-		echo "$*"
+		if cleaning-mode ; then
+            echo "$*"
+        fi
 		return 1
 	fi
 	return 0
+}
+
+cleaning-mode() {
+    [[ "$GITSA_shell" = true ]]
 }
 
 git-verify() {
@@ -26,11 +33,15 @@ git-verify() {
 		return 0
 	fi
 
+    if cleaning-mode; then
     (
         out:error "Fix '$1'"
         cd "$1"
         bash
     )
+    else
+        out:error "$1"
+    fi
 }
 
 main() {
@@ -39,12 +50,25 @@ main() {
         exit 0
     fi
 
-    local target git_paths path
+    local target git_paths path script
     git_paths=(:)
 
 	if [[ -n "${1:-}" ]]; then
-		git-verify "$1"
+        if [[ -d "$1/.git" ]]; then
+    		git-verify "$1"
+
+        elif [[ -d "$1" ]]; then
+            script="$(abspath:path "$0")"
+            (cd "$1" ; bash "$script")
+
+        else
+            out:fail "Invalid target '$1'"
+        fi
 	else
+        if ! cleaning-mode; then
+            out:info "Cleaning mode is off - no subshell will spawn. Set GITSA_shell=true to enable it"
+        fi
+
         # 2-passes
         # We want to potentially open subshells;
         # to prevent these from inheriting piped input from find

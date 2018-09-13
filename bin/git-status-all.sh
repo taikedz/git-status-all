@@ -213,28 +213,98 @@ colours:define() {
 }
 
 colours:auto
+##bash-libs: abspath.sh @ f6496eca (1.1.4)
+
+### abspath:path RELATIVEPATH [ MAX ] Usage:bbuild
+# Returns the absolute path of a file/directory
+#
+# MAX defines the maximum number of "../" relative items to process
+#   default is 50
+###/doc
+
+function abspath:path {
+    local workpath="$1" ; shift || :
+    local max="${1:-50}" ; shift || :
+
+    if [[ "${workpath:0:1}" != "/" ]]; then workpath="$PWD/$workpath"; fi
+
+    workpath="$(abspath:collapse "$workpath")"
+    abspath:resolve_dotdot "$workpath" "$max" | sed -r 's|(.)/$|\1|'
+}
+
+function abspath:collapse {
+    echo "$1" | sed -r 's|/\./|/|g ; s|/\.$|| ; s|/+|/|g'
+}
+
+function abspath:resolve_dotdot {
+    local workpath="$1"; shift || :
+    local max="$1"; shift || :
+
+    # Set a limit on how many iterations to perform
+    # Only very obnoxious paths should fail
+    local obnoxious_counter
+    for obnoxious_counter in $(seq 1 $max); do
+        # No more dot-dots - good to go
+        if [[ ! "$workpath" =~ /\.\.(/|$) ]]; then
+            echo "$workpath"
+            return 0
+        fi
+
+        # Starts with an up-one at root - unresolvable
+        if [[ "$workpath" =~ ^/\.\.(/|$) ]]; then
+            return 1
+        fi
+
+        workpath="$(echo "$workpath"|sed -r 's@[^/]+/\.\.(/|$)@@')"
+    done
+
+    # A very obnoxious path was used.
+    return 2
+}
 printhelp() {
 cat <<'ENDOFHELPFILE'
 # Git Status All (Shell)
 
-A shell script that recurses down the current directory to find all git repositores. If the status does not contain `working tree clean`, a new interactive shell is started for you to perform cleanup. Once you have cleaned up the repo, exit the subshell, and the script will continue.
+A shell script that recurses down the current directory to find all git repositores.
+
+If the status does not contain `working tree clean`, it is marked as needing attention.
+
+If the environment variable `GITSA_shell=true` is set, a new interactive shell is started for you to perform cleanup on each repo. Once you have cleaned up the repo, exit the subshell, and the script will continue.
+
+Examples
+
+    # List all repos that need attention under current working directory
+    git-status-all.sh
+
+    # Step through each repo that needs attention, opening a shell for each
+    GITSA_shell=true git-status-all.sh
+
+    # Check a single repo, or recurse through the repos of the target directory for checking
+    git-status-all.sh some-dir/
 ENDOFHELPFILE
 }
 
 STR_clean_tree="working (tree|directory) clean"
+: ${GITSA_shell=false}
 
 git-status() { (
 	cd "$1"
-	echo "${CYEL}$(dirname "$1")${CDEF}"
+	echo "${CYEL}$1${CDEF}"
 	git status  | sed -r "s/^(\t.+)$/${CBRED}\1${CDEF}/ ; s/^/\t/"
 ) ; }
 
 is-clean() {
 	if [[ ! "$*" =~ $STR_clean_tree ]]; then
-		echo "$*"
+		if cleaning-mode ; then
+            echo "$*"
+        fi
 		return 1
 	fi
 	return 0
+}
+
+cleaning-mode() {
+    [[ "$GITSA_shell" = true ]]
 }
 
 git-verify() {
@@ -242,11 +312,15 @@ git-verify() {
 		return 0
 	fi
 
+    if cleaning-mode; then
     (
         out:error "Fix '$1'"
         cd "$1"
         bash
     )
+    else
+        out:error "$1"
+    fi
 }
 
 main() {
@@ -255,12 +329,25 @@ main() {
         exit 0
     fi
 
-    local target git_paths path
+    local target git_paths path script
     git_paths=(:)
 
 	if [[ -n "${1:-}" ]]; then
-		git-verify "$1"
+        if [[ -d "$1/.git" ]]; then
+    		git-verify "$1"
+
+        elif [[ -d "$1" ]]; then
+            script="$(abspath:path "$0")"
+            (cd "$1" ; bash "$script")
+
+        else
+            out:fail "Invalid target '$1'"
+        fi
 	else
+        if ! cleaning-mode; then
+            out:info "Cleaning mode is off - no subshell will spawn. Set GITSA_shell=true to enable it"
+        fi
+
         # 2-passes
         # We want to potentially open subshells;
         # to prevent these from inheriting piped input from find
