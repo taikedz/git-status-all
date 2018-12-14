@@ -2,7 +2,10 @@
 
 set -e
 
-#%include out.sh colours.sh abspath.sh
+#%include std/out.sh
+#%include std/colours.sh
+#%include std/abspath.sh
+
 #%include help.sh
 
 STR_clean_tree="working (tree|directory) clean"

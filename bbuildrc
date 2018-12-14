@@ -1,2 +1,0 @@
-BUILDOUTD=bin
-BBFILES=src/git-status-all.sh
